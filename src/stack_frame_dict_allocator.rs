@@ -165,7 +165,7 @@ where
         }
     }
 
-    /// Creates a new frame to push elements onto.
+    /// Creates a new frame to push elements onto in a new scope.
     /// 
     /// Creates a new scope where a new frame lives,
     /// at the end of the scope, the new frame and all its items
@@ -224,7 +224,7 @@ where
     /// });
     /// # }
     /// ``` 
-    pub fn new_frame<'n, F>(&self, mut scope: F) 
+    pub fn new_scope<'n, F>(&self, mut scope: F) 
     where 
         's : 'n,
         Key : 'n, 
@@ -245,6 +245,57 @@ where
             //scope will automatically pop the new frame
             scope(new_frame);
         }
+    }
+
+    /// Creates a new frame to push elements onto within the same scope
+    /// 
+    /// [new_scope][stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator::new_scope]
+    /// is generally preferred, however there are some use cases where you should be able to create
+    /// a new frame and give ownership to it to a new scope.  This function is not recommended if you're
+    /// not transferring ownership of the frame.  You also generally shouldn't push items onto the frame
+    /// before transferring ownership, it is memory safe, but there's no logical purpose to it.  So a
+    /// general rule of thumb is to never assign the return value to variable.
+    /// 
+    /// Also its better to only have one instance of a frame.
+    /// Creating multiple references to a stack can run into the same issue
+    /// where you create values you, at some point, won't have access to.
+    /// So functions using the Allocator should not take in references to it,
+    /// and should instead create a new frame and pass-by-value.  
+    /// It is still memory safe to pass references to the stack, 
+    /// it is just not preferred.
+    /// 
+    /// # Examples
+    /// 
+    /// ```edition2020
+    /// pub struct Chainable {
+    ///     //input fields here
+    /// };
+    /// 
+    /// impl Chainable {
+    ///     pub fn chain(&self, stack: StackFrameDictAllocator<&str, usize>, input: usize) -> Chainable {
+    ///         //do stuff
+    ///     }
+    /// }
+    /// 
+    /// #pub fn main() {
+    /// let stack = StackFrameDictAllocator::<&str, usize>::new();
+    /// 
+    /// let chain = Chainable { /* assign fields */ };
+    /// 
+    /// chain.chain(stack.new_frame(), 1)
+    ///      .chain(stack.new_frame(), 2)
+    ///      .chain(stack.new_frame(), 3);
+    /// #}
+    /// ```
+    pub fn new_frame(&self) -> StackFrameDictAllocator<'s, Key, Value> {
+        unsafe {StackFrameDictAllocator {
+            size: self.size,
+            current_frame: UnsafeCell::new((*self.current_frame.get()).clone()),
+            buffer_bytes_used: UnsafeCell::new(
+                (*self.buffer_bytes_used.get()).clone()
+            ),
+            phantom: self.phantom
+        }}
     }
 
     unsafe fn generate_frame<'n>(&self) {
@@ -1107,7 +1158,7 @@ mod test {
         stack.push("red", "first");
         stack.push("blue", "first");
         
-        stack.new_frame(|stack| {
+        stack.new_scope(|stack| {
             stack.push("red", "second");
         
             let red = stack.get_in_frame("red").unwrap().get();
@@ -1135,7 +1186,7 @@ mod test {
         stack.push("red", "old");
         stack.push("blue", "old");
     
-        stack.new_frame(|stack| {
+        stack.new_scope(|stack| {
             stack.push("green", "new");
     
             let red = stack.get_in_stack("red").unwrap().get();
@@ -1189,7 +1240,7 @@ mod test {
             stack.push(DropPrint("key1scope1"), DropTest("value1scope1", &dropped));
             stack.push(DropPrint("key2scope1"), DropTest("value2scope1", &dropped));
             stack.push(DropPrint("key3scope1"), DropTest("value3scope1", &dropped));
-            stack.new_frame(|stack| {
+            stack.new_scope(|stack| {
                 stack.push(DropPrint("key1scope2"), DropTest("value1scope2", &dropped));
                 stack.push(DropPrint("key2scope2"), DropTest("value2scope2", &dropped));
                 stack.push(DropPrint("key3scope2"), DropTest("value3scope2", &dropped));

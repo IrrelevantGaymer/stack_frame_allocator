@@ -9,13 +9,13 @@ pub fn main() {
     stack.push("III", 3);
     stack.print();
 
-    stack.new_frame(|stack| {
+    stack.new_scope(|stack| {
         stack.push("a", 10);
         stack.print();
         stack.push("b", 20);
         stack.print();
 
-        stack.new_frame(|stack| {
+        stack.new_scope(|stack| {
             stack.push("1", 100);
             stack.print();
             stack.push("2", 200);

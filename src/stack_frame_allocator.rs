@@ -206,7 +206,7 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
     /// });
     /// # }
     /// ``` 
-    pub fn new_frame<'n, F>(&self, mut scope: F) 
+    pub fn new_scope<'n, F>(&self, mut scope: F) 
     where 
         's : 'n,
         F : FnMut(StackFrameAllocator<'n, Value>)
@@ -226,6 +226,57 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
             //scope will automatically pop the new frame
             scope(new_frame);
         }
+    }
+
+    /// Creates a new frame to push elements onto within the same scope
+    /// 
+    /// [new_scope][stack_frame_allocators::stack_frame_allocator::StackFrameDictAllocator::new_scope]
+    /// is generally preferred, however there are some use cases where you should be able to create
+    /// a new frame and give ownership to it to a new scope.  This function is not recommended if you're
+    /// not transferring ownership of the frame.  You also generally shouldn't push items onto the frame
+    /// before transferring ownership, it is memory safe, but there's no logical purpose to it.  So a
+    /// general rule of thumb is to never assign the return value to variable.
+    /// 
+    /// Also its better to only have one instance of a frame.
+    /// Creating multiple references to a stack can run into the same issue
+    /// where you create values you, at some point, won't have access to.
+    /// So functions using the Allocator should not take in references to it,
+    /// and should instead create a new frame and pass-by-value.  
+    /// It is still memory safe to pass references to the stack, 
+    /// it is just not preferred.
+    /// 
+    /// # Examples
+    /// 
+    /// ```edition2020
+    /// pub struct Chainable {
+    ///     //input fields here
+    /// };
+    /// 
+    /// impl Chainable {
+    ///     pub fn chain(&self, stack: StackFrameAllocator<&str, usize>, input: usize) -> Chainable {
+    ///         //do stuff
+    ///     }
+    /// }
+    /// 
+    /// #pub fn main() {
+    /// let stack = StackFrameAllocator::<&str, usize>::new();
+    /// 
+    /// let chain = Chainable { /* assign fields */ };
+    /// 
+    /// chain.chain(stack.new_frame(), 1)
+    ///      .chain(stack.new_frame(), 2)
+    ///      .chain(stack.new_frame(), 3);
+    /// #}
+    /// ```
+    pub fn new_frame(&self) -> StackFrameAllocator<'s, Value> {
+        unsafe {StackFrameAllocator {
+            size: self.size,
+            current_frame: UnsafeCell::new((*self.current_frame.get()).clone()),
+            buffer_bytes_used: UnsafeCell::new(
+                (*self.buffer_bytes_used.get()).clone()
+            ),
+            phantom: self.phantom
+        }}
     }
 
     unsafe fn generate_frame<'n>(&self) {
