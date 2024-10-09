@@ -1,4 +1,4 @@
-use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
 
 pub fn main() {
     let stack = StackFrameDictAllocator::<&str, usize>::new();

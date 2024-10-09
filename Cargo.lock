@@ -3,5 +3,5 @@
 version = 3
 
 [[package]]
-name = "stack_frame_allocator"
+name = "stack_frame_allocators"
 version = "0.1.0"

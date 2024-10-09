@@ -1,5 +1,7 @@
 [package]
-name = "stack_frame_allocator"
+name = "stack_frame_allocators"
+description = "A set of allocators based off the concept of the stack and creating \"Frames\". Push frames onto the Stack, push values onto Frames, and pop entire Frames and their items"
+repository = "https://github.com/IrrelevantGaymer/stack_frame_allocator/"
 version = "0.1.0"
 edition = "2021"
 
