@@ -20,6 +20,7 @@ autotests = false
 autobenches = false
 description = 'A set of allocators based off the concept of the stack and creating "Frames". Push frames onto the Stack, push values onto Frames, and pop entire Frames and their items'
 readme = "README.md"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/IrrelevantGaymer/stack_frame_allocator/"
 
 [lib]
