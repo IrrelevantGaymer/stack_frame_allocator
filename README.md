@@ -1,3 +1,5 @@
+goto https://docs.rs/stack_frame_allocators/latest/stack_frame_allocators/ for documentation
+
 # Stack Frame Allocators
 
 Stack Frame Allocators are based off the concept of the Stack and creating "Frames" where values can be pushed onto this frame.  Instead of popping individual items,
