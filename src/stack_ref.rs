@@ -54,7 +54,7 @@ pub mod unsafe_ref {
         /// # Examples
         /// 
         /// ```rust
-        /// # use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+        /// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
         /// 
         /// let stack = StackFrameDictAllocator::<&str, usize>::new();
         /// stack.push("a", 80085);
@@ -85,7 +85,7 @@ pub mod unsafe_ref {
         /// # Examples
         /// 
         /// ```edition2020
-        /// # use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+        /// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
         /// 
         /// let stack = StackFrameDictAllocator::<&str, usize>::new();
         /// stack.push("a", 0);
@@ -101,7 +101,7 @@ pub mod unsafe_ref {
         /// ```
         /// ```edition2020
         /// /* Better Alternative */
-        /// # use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+        /// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
         /// 
         /// use std::cell::RefCell;
         /// 
@@ -157,7 +157,7 @@ pub mod safe_ref {
         /// # Examples
         /// 
         /// ```rust
-        /// # use stack_frame_allocator::stack_frame_allocator::StackFrameAllocator;
+        /// # use stack_frame_allocators::stack_frame_allocator::StackFrameAllocator;
         /// 
         /// let stack = StackFrameAllocator::<usize>::new();
         /// let a = stack.push(80085).get();
@@ -184,7 +184,7 @@ pub mod safe_ref {
         /// # Examples
         /// 
         /// ```edition2020
-        /// # use stack_frame_allocator::stack_frame_allocator::StackFrameAllocator;
+        /// # use stack_frame_allocators::stack_frame_allocator::StackFrameAllocator;
         /// 
         /// let stack = StackFrameAllocator::<usize>::new();
         /// let mut a = stack.push(1).get_mut();

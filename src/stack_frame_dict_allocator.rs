@@ -23,7 +23,7 @@ use crate::{block_tail::BlockTail, stack_frame_header::StackFrameHeader, stack_r
 /// # Examples
 /// 
 /// ```edition2020
-/// # use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+/// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
 /// 
 /// use std::cell::RefCell;
 /// 
@@ -32,11 +32,11 @@ use crate::{block_tail::BlockTail, stack_frame_header::StackFrameHeader, stack_r
 /// stack.push("II", RefCell::new(1));
 /// stack.push("III", RefCell::new(2));
 /// 
-/// stack.new_frame(|stack| {
+/// stack.new_scope(|stack| {
 ///     stack.push("a", RefCell::new(3));
 ///     stack.push("b", RefCell::new(4));
 /// 
-///     stack.new_frame(|stack| {
+///     stack.new_scope(|stack| {
 ///         stack.push("1", RefCell::new(5));
 ///         stack.push("2", RefCell::new(6));
 /// 
@@ -92,7 +92,7 @@ where
     /// # Examples
     /// 
     /// ```edition2020
-    /// # use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+    /// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
     /// 
     /// use std::cell::RefCell;
     /// 
@@ -101,11 +101,11 @@ where
     /// stack.push("II", RefCell::new(1));
     /// stack.push("III", RefCell::new(2));
     /// 
-    /// stack.new_frame(|stack| {
+    /// stack.new_scope(|stack| {
     ///     stack.push("a", RefCell::new(3));
     ///     stack.push("b", RefCell::new(4));
     /// 
-    ///     stack.new_frame(|stack| {
+    ///     stack.new_scope(|stack| {
     ///         stack.push("1", RefCell::new(5));
     ///         stack.push("2", RefCell::new(6));
     /// 
@@ -194,7 +194,7 @@ where
     /// # Examples
     /// 
     /// ```edition2020
-    /// # use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+    /// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
     /// 
     /// pub fn bad_foo(stack: &StackFrameDictAllocator<&str, usize>) {
     ///     //do stuff here
@@ -216,8 +216,8 @@ where
     /// }
     /// 
     /// //instead do this
-    /// stack.new_frame(|stack| {
-    ///     stack.new_frame(good_foo);
+    /// stack.new_scope(|stack| {
+    ///     stack.new_scope(good_foo);
     ///     
     ///     stack.push("yes", 420);
     ///     stack.push("oui", 69);
@@ -267,17 +267,20 @@ where
     /// # Examples
     /// 
     /// ```edition2020
+    /// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
+    /// 
     /// pub struct Chainable {
     ///     //input fields here
-    /// };
+    /// }
     /// 
     /// impl Chainable {
     ///     pub fn chain(&self, stack: StackFrameDictAllocator<&str, usize>, input: usize) -> Chainable {
     ///         //do stuff
+    ///         # return Chainable {};
     ///     }
     /// }
     /// 
-    /// #pub fn main() {
+    /// # pub fn main() {
     /// let stack = StackFrameDictAllocator::<&str, usize>::new();
     /// 
     /// let chain = Chainable { /* assign fields */ };
@@ -285,17 +288,24 @@ where
     /// chain.chain(stack.new_frame(), 1)
     ///      .chain(stack.new_frame(), 2)
     ///      .chain(stack.new_frame(), 3);
-    /// #}
+    /// # }
     /// ```
     pub fn new_frame(&self) -> StackFrameDictAllocator<'s, Key, Value> {
-        unsafe {StackFrameDictAllocator {
-            size: self.size,
-            current_frame: UnsafeCell::new((*self.current_frame.get()).clone()),
-            buffer_bytes_used: UnsafeCell::new(
-                (*self.buffer_bytes_used.get()).clone()
-            ),
-            phantom: self.phantom
-        }}
+        let stack;
+        unsafe {
+            stack = StackFrameDictAllocator {
+                size: self.size,
+                current_frame: UnsafeCell::new((*self.current_frame.get()).clone()),
+                buffer_bytes_used: UnsafeCell::new(
+                    (*self.buffer_bytes_used.get()).clone()
+                ),
+                phantom: self.phantom
+            };
+
+            stack.generate_frame();
+        }
+
+        return stack;
     }
 
     unsafe fn generate_frame<'n>(&self) {
@@ -401,7 +411,7 @@ where
     /// 
     /// ```edition2020
     /// use std::cell::RefCell;
-    /// # use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+    /// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
     /// 
     /// let stack = StackFrameDictAllocator::<&str, RefCell<usize>>::new();
     /// 
@@ -550,14 +560,14 @@ where
     /// # Examples
     /// 
     /// ```edition2020
-    /// # use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+    /// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
     /// 
     /// let stack = StackFrameDictAllocator::<&str, &str>::new();
     /// 
     /// stack.push("red", "first");
     /// stack.push("blue", "first");
     /// 
-    /// stack.new_frame(|stack| {
+    /// stack.new_scope(|stack| {
     ///     stack.push("red", "second");
     /// 
     ///     let red = stack.get_in_frame("red").unwrap().get();
@@ -683,14 +693,14 @@ where
     /// # Examples
     /// 
     /// ```edition2020
-    /// # use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+    /// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
     /// 
     /// let stack = StackFrameDictAllocator::<&str, &str>::new();
     /// 
     /// stack.push("red", "old");
     /// stack.push("blue", "old");
     /// 
-    /// stack.new_frame(|stack| {
+    /// stack.new_scope(|stack| {
     ///     stack.push("green", "new");
     /// 
     ///     let red = stack.get_in_stack("red").unwrap().get();
@@ -841,7 +851,7 @@ where
     /// # Examples
     /// 
     /// ```edition2020
-    /// # use stack_frame_allocator::stack_frame_dict_allocator::StackFrameDictAllocator;
+    /// # use stack_frame_allocators::stack_frame_dict_allocator::StackFrameDictAllocator;
     /// 
     /// let stack = StackFrameDictAllocator::<&str, usize>::new();
     /// 
@@ -852,7 +862,7 @@ where
     /// //first print
     /// stack.print();
     /// 
-    /// stack.new_frame(|stack| {
+    /// stack.new_scope(|stack| {
     ///     stack.push("a", 3);
     ///     stack.push("b", 4);
     /// 
@@ -1233,7 +1243,7 @@ mod test {
     }
 
     #[test]
-    pub fn drop_test() {
+    pub fn drop_scope_test() {
         let dropped = RefCell::new(vec![]);
         {
             let stack = StackFrameDictAllocator::<DropPrint<&str>, DropTest>::new();
@@ -1257,6 +1267,21 @@ mod test {
         ];
 
         assert_eq!(*dropped.borrow(), compare);
+    }
+
+    #[test]
+    pub fn drop_frame_test() {
+        let dropped = RefCell::new(vec![]);
+        {
+            let stack = StackFrameDictAllocator::<DropPrint<&str>, DropTest>::new();
+            stack.push(DropPrint("key1scope1"), DropTest("value1scope1", &dropped));
+            stack.push(DropPrint("key2scope1"), DropTest("value2scope1", &dropped));
+            stack.push(DropPrint("key3scope1"), DropTest("value3scope1", &dropped));
+            let stack = stack.new_frame();
+            stack.push(DropPrint("key1scope2"), DropTest("value1scope2", &dropped));
+            stack.push(DropPrint("key2scope2"), DropTest("value2scope2", &dropped));
+            stack.push(DropPrint("key3scope2"), DropTest("value3scope2", &dropped));
+        }
     }
 
     #[test]

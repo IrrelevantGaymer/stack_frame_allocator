@@ -25,18 +25,18 @@ use crate::{block_tail::BlockTail, stack_frame_header::StackFrameHeader, stack_r
 /// # Examples
 /// 
 /// ```edition2020
-/// # use stack_frame_allocator::stack_frame_allocator::StackFrameAllocator;
+/// # use stack_frame_allocators::stack_frame_allocator::StackFrameAllocator;
 /// 
 /// let stack = StackFrameAllocator::<&str>::new();
 /// stack.push("I");
 /// stack.push("II");
 /// stack.push("III");
 /// 
-/// stack.new_frame(|stack| {
+/// stack.new_scope(|stack| {
 ///     let a = stack.push("a").get();
 ///     let mut b = stack.push("b").get_mut();
 /// 
-///     stack.new_frame(|stack| {
+///     stack.new_scope(|stack| {
 ///         let one = stack.push("1").get();
 ///         let two = stack.push("2").get();
 /// 
@@ -82,18 +82,18 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
     /// # Examples
     /// 
     /// ```edition2020
-    /// # use stack_frame_allocator::stack_frame_allocator::StackFrameAllocator;
+    /// # use stack_frame_allocators::stack_frame_allocator::StackFrameAllocator;
     /// 
     /// let stack = StackFrameAllocator::<&str>::new();
     /// stack.push("I");
     /// stack.push("II");
     /// stack.push("III");
     /// 
-    /// stack.new_frame(|stack| {
+    /// stack.new_scope(|stack| {
     ///     let a = stack.push("a").get();
     ///     let mut b = stack.push("b").get_mut();
     /// 
-    ///     stack.new_frame(|stack| {
+    ///     stack.new_scope(|stack| {
     ///         let one = stack.push("1").get();
     ///         let two = stack.push("2").get();
     /// 
@@ -176,7 +176,7 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
     /// # Examples
     /// 
     /// ```edition2020
-    /// # use stack_frame_allocator::stack_frame_allocator::StackFrameAllocator;
+    /// # use stack_frame_allocators::stack_frame_allocator::StackFrameAllocator;
     /// 
     /// pub fn bad_foo(stack: &StackFrameAllocator<&str>) {
     ///     //do stuff here
@@ -198,8 +198,8 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
     /// }
     /// 
     /// //instead do this
-    /// stack.new_frame(|stack| {
-    ///     stack.new_frame(good_foo);
+    /// stack.new_scope(|stack| {
+    ///     stack.new_scope(good_foo);
     ///     
     ///     stack.push("yes");
     ///     stack.push("oui");
@@ -248,35 +248,45 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
     /// # Examples
     /// 
     /// ```edition2020
+    /// # use stack_frame_allocators::stack_frame_allocator::StackFrameAllocator;
+    /// 
     /// pub struct Chainable {
     ///     //input fields here
-    /// };
+    /// }
     /// 
     /// impl Chainable {
-    ///     pub fn chain(&self, stack: StackFrameAllocator<&str, usize>, input: usize) -> Chainable {
+    ///     pub fn chain(&self, stack: StackFrameAllocator<&str>, input: usize) -> Chainable {
     ///         //do stuff
+    ///         # return Chainable {};
     ///     }
     /// }
     /// 
-    /// #pub fn main() {
-    /// let stack = StackFrameAllocator::<&str, usize>::new();
+    /// # pub fn main() {
+    /// let stack = StackFrameAllocator::<&str>::new();
     /// 
     /// let chain = Chainable { /* assign fields */ };
     /// 
     /// chain.chain(stack.new_frame(), 1)
     ///      .chain(stack.new_frame(), 2)
     ///      .chain(stack.new_frame(), 3);
-    /// #}
+    /// # }
     /// ```
     pub fn new_frame(&self) -> StackFrameAllocator<'s, Value> {
-        unsafe {StackFrameAllocator {
-            size: self.size,
-            current_frame: UnsafeCell::new((*self.current_frame.get()).clone()),
-            buffer_bytes_used: UnsafeCell::new(
-                (*self.buffer_bytes_used.get()).clone()
-            ),
-            phantom: self.phantom
-        }}
+        let stack;
+        unsafe {
+            stack = StackFrameAllocator {
+                size: self.size,
+                current_frame: UnsafeCell::new((*self.current_frame.get()).clone()),
+                buffer_bytes_used: UnsafeCell::new(
+                    (*self.buffer_bytes_used.get()).clone()
+                ),
+                phantom: self.phantom
+            };
+
+            stack.generate_frame();
+        }
+
+        return stack;
     }
 
     unsafe fn generate_frame<'n>(&self) {
@@ -373,7 +383,7 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
     /// # Examples
     /// 
     /// ```edition2020
-    /// # use stack_frame_allocator::stack_frame_allocator::StackFrameAllocator;
+    /// # use stack_frame_allocators::stack_frame_allocator::StackFrameAllocator;
     /// 
     /// let stack = StackFrameAllocator::<usize>::new();
     /// 
@@ -479,7 +489,7 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
     /// # Examples
     /// 
     /// ```edition2020
-    /// # use stack_frame_allocator::stack_frame_allocator::StackFrameAllocator;
+    /// # use stack_frame_allocators::stack_frame_allocator::StackFrameAllocator;
     /// 
     /// let stack = StackFrameAllocator::<usize>::new();
     /// stack.push(1);
@@ -487,13 +497,13 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
     /// stack.push(3);
     /// stack.print();
     /// 
-    /// stack.new_frame(|stack| {
+    /// stack.new_scope(|stack| {
     ///     stack.push(10);
     ///     stack.push(20);
     ///     stack.push(30);
     ///     stack.print();
     /// 
-    ///     stack.new_frame(|stack| {
+    ///     stack.new_scope(|stack| {
     ///         stack.push(100);
     ///         stack.push(200);
     ///         stack.print();
@@ -676,18 +686,57 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
     //TODO add allocated_blocks(&self) -> usize and using_blocks(&self) -> usize functions
 }
 
-#[cfg(test)]
-mod test {
-    
-
-    
-}
-
 impl<'s, Value> Drop for StackFrameAllocator<'s, Value> {
     fn drop(&mut self) {
         //eprintln!("dropping stack frame");
         unsafe {
-            //TODO drop all key value pairs in dropped frame
+            let current_frame_ptr = (*self.current_frame.get()).as_ptr().cast::<u8>();
+            let mut bytes_remaining = *self.buffer_bytes_used.get();
+            let mut peek_ptr = (*current_frame_ptr.cast::<StackFrameHeader>()).current_frame_ptr;
+            let mut curr_block_tail = self.get_block_tail();
+    
+            //because we're only dropping the current scope,
+            //we can assume the padding after the header
+            //is key padding, because we shouldn't be expecting a header 
+            //after the header we're looking in
+            let stack_frame_ptr_after = {
+                let offset_ptr = current_frame_ptr.add(Self::SIZE_HEADER);
+                let padding = offset_ptr.align_offset(Self::ALIGN_VALUE);
+                offset_ptr.add(padding)
+            };
+    
+            //eprintln!("starting search at {:?} until {:?}", peek_ptr, stack_frame_ptr_after);
+            while peek_ptr > stack_frame_ptr_after {
+                // eprintln!("peeking at {:?} until {:?} with {} bytes remaining", 
+                //     peek_ptr, stack_frame_ptr_after, bytes_remaining
+                // );
+                if bytes_remaining == 0 {
+                    if curr_block_tail.prev_block.is_null() {
+                        unreachable!("{}", concat!(
+                            "the previous block can only be null ",  
+                            "if the block currently being looked at is the first block.  ",  
+                            "In that case, the header logic would've ran first, ", 
+                            "thus this should never be reached"
+                        ))
+                    }
+                    bytes_remaining = curr_block_tail.prev_block_bytes_used;
+                    peek_ptr = curr_block_tail.prev_block;
+    
+                    let offset = self.real_size().bytes() - bytes_remaining;
+            
+                    curr_block_tail = peek_ptr
+                        .add(offset)
+                        .cast::<BlockTail>()
+                        .as_mut()
+                        .expect("Error grabbing mutable reference to BlockTail");
+                }
+    
+                //dropping key and value pair
+                peek_ptr = peek_ptr.sub(Self::SIZE_VALUE);
+                bytes_remaining -= Self::SIZE_VALUE;
+                
+                std::ptr::drop_in_place(peek_ptr.cast::<Value>());
+            }
             
             if (*self.current_frame.get()).as_ref().previous_frame.is_none() {
                 //eprintln!("dropping whole stack");
@@ -708,5 +757,85 @@ impl<'s, Value> Drop for StackFrameAllocator<'s, Value> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use std::cell::RefCell;
+
+    #[doc(hidden)]
+    pub struct DropTest<'d>(&'d str, &'d RefCell<Vec<&'d str>>);
+
+    impl<'d> Drop for DropTest<'d> {
+        fn drop(&mut self) {
+            let (value, dropped) = (self.0, self.1);
+
+            dropped.borrow_mut().push(value);
+        }
+    }
+
+    #[doc(hidden)]
+    #[derive(PartialEq, Eq, Hash)]
+    pub struct DropPrint<T>(T) where T : Display;
+
+    impl<T> Drop for DropPrint<T> where T : Display {
+        fn drop(&mut self) {
+            println!("{}", self.0);
+        }
+    }
+
+    #[test]
+    pub fn drop_scope_test() {
+        let dropped = RefCell::new(vec![]);
+        {
+            let stack = StackFrameAllocator::<DropTest>::new();
+            stack.push(DropTest("value1scope1", &dropped));
+            stack.push(DropTest("value2scope1", &dropped));
+            stack.push(DropTest("value3scope1", &dropped));
+            stack.new_scope(|stack| {
+                stack.push(DropTest("value1scope2", &dropped));
+                stack.push(DropTest("value2scope2", &dropped));
+                stack.push(DropTest("value3scope2", &dropped));
+            });
+        }
+
+        let compare = vec![
+            "value3scope2", 
+            "value2scope2", 
+            "value1scope2", 
+            "value3scope1", 
+            "value2scope1", 
+            "value1scope1"
+        ];
+
+        assert_eq!(*dropped.borrow(), compare);
+    }
+
+    #[test]
+    pub fn drop_frame_test() {
+        let dropped = RefCell::new(vec![]);
+        {
+            let stack = StackFrameAllocator::<DropTest>::new();
+            stack.push(DropTest("value1scope1", &dropped));
+            stack.push(DropTest("value2scope1", &dropped));
+            stack.push(DropTest("value3scope1", &dropped));
+            let stack = stack.new_frame();
+            stack.push(DropTest("value1scope2", &dropped));
+            stack.push(DropTest("value2scope2", &dropped));
+            stack.push(DropTest("value3scope2", &dropped));
+        }
+    }
+
+    #[test]
+    #[allow(unused_variables)]
+    pub fn empty_drop_test() {
+        let stack_u8 = StackFrameAllocator::<DropPrint<u8>>::new();
+        let stack_u16 = StackFrameAllocator::<DropPrint<u16>>::new();
+        let stack_u32 = StackFrameAllocator::<DropPrint<u32>>::new();
+        let stack_u64 = StackFrameAllocator::<DropPrint<u64>>::new();
+        let stack_u128 = StackFrameAllocator::<DropPrint<u128>>::new();
     }
 }
