@@ -78,6 +78,13 @@ where
     #[allow(dead_code)]
     const ALIGN_TAIL:       usize = std::mem::align_of::<BlockTail>();
 
+    /// Since the beginning of a block could either be a header or a key
+    /// We want to have the larger alignment so accessing either the header
+    /// or the key at the beginning of the block is safe
+    const ALIGN_BLOCK: usize = [Self::ALIGN_HEADER, Self::ALIGN_KEY][
+        (Self::ALIGN_HEADER < Self::ALIGN_KEY) as usize
+    ];
+
     /// Creates a new StackFrameDictAllocator
     /// 
     /// The StackFrameDictAllocator allows the creation of "Frames"
@@ -128,21 +135,25 @@ where
         let allocated_block;
         let current_frame_pointer;
         unsafe {
-            allocated_block = std::alloc::alloc(
-                Layout::array::<u8>(size.bytes()).expect("could not allocate memory")
-            );
-            
-            //size.bytes() should be a multiple of a large power of two,
-            //therefore size.bytes() should be aligned to BlockTail already,
-            //so we just need to move back so that way we're writing the block tail
-            //at the end of the block
-            let block_tail = allocated_block.add(size.bytes() - Self::SIZE_TAIL);
-            (block_tail as *mut BlockTail).write(BlockTail {
-                prev_block: std::ptr::null_mut(),
-                prev_block_bytes_used: 0 /* we'll never read this value if prev_block is null */,
-                next_block: std::ptr::null_mut()
-            });
+            let block_layout = Layout::from_size_align(
+                size.bytes(), 
+                Self::ALIGN_BLOCK
+            ).expect("could not generate memory layout");
+            allocated_block = std::alloc::alloc(block_layout);
 
+            if allocated_block.is_null() {
+                std::alloc::handle_alloc_error(block_layout);
+            }
+
+            // size.bytes() should be a multiple of a large power of two,
+            // therefore size.bytes() should be aligned to BlockTail already,
+            // so we just need to move back so that way we're writing the block tail
+            // at the end of the block
+            let block_tail = allocated_block
+                .add(size.bytes() - Self::SIZE_TAIL)
+                .cast::<BlockTail>();
+            block_tail.write(BlockTail::default());
+            
             current_frame_pointer = allocated_block.add(Self::SIZE_HEADER);
         }
 
@@ -326,20 +337,24 @@ where
             let curr_block_tail = self.get_block_tail();
             
             if curr_block_tail.next_block.is_null() {
-                let allocated_block = unsafe {std::alloc::alloc(
-                    Layout::array::<u8>(self.size.bytes())
-                        .expect("could not allocate memory")
-                )};
+                let block_layout = Layout::from_size_align(
+                    self.size.bytes(), 
+                    Self::ALIGN_BLOCK
+                ).expect("could not generate memory layout");
+                let allocated_block = unsafe {std::alloc::alloc(block_layout)};
+
+                if allocated_block.is_null() {
+                    std::alloc::handle_alloc_error(block_layout);
+                }
 
                 let next_block_tail = allocated_block.add(
                     self.size.bytes() - Self::SIZE_TAIL
                 );
-                //eprintln!("writing block tail at {:?}", next_block_tail);
-                (next_block_tail as *mut BlockTail).write(BlockTail {
-                    prev_block: (*self.current_frame.get()).as_ptr().cast(),
-                    prev_block_bytes_used: (*self.buffer_bytes_used.get()),
-                    next_block: std::ptr::null_mut()
-                });
+                (next_block_tail as *mut BlockTail).write(BlockTail::new(
+                    (*self.current_frame.get()).as_ptr().cast(),
+                    *self.buffer_bytes_used.get(),
+                    std::ptr::null_mut()
+                ));
 
                 curr_block_tail.next_block = allocated_block;
             }
@@ -347,6 +362,7 @@ where
             curr_block_tail.next_block
         };
 
+        *self.buffer_bytes_used.get() += Self::SIZE_HEADER;
         let current_frame_ptr = mem.add(Self::SIZE_HEADER);
         
         let new_frame = StackFrameHeader {
@@ -387,13 +403,10 @@ where
     unsafe fn get_block_tail(&self) -> &mut BlockTail {
         let offset = self.real_size().bytes() - *self.buffer_bytes_used.get();
         
-        return (*self.current_frame.get())
-            .as_ref()
-            .current_frame_ptr
-            .add(offset)
-            .cast::<BlockTail>()
-            .as_mut()
-            .expect("Error grabbing mutable reference to BlockTail");
+        let current_frame_ptr = (*self.current_frame.get()).as_ref().current_frame_ptr;
+        let block_tail_ptr = current_frame_ptr.add(offset).cast::<BlockTail>();
+
+        return block_tail_ptr.as_mut().expect("Error grabbing mutable reference to BlockTail");
     }
 
     /// Pushes a Key Value pair into the current frame,
@@ -463,15 +476,9 @@ where
                 value_padding + Self::SIZE_VALUE < 
                 self.real_size().bytes();
         }
-        
+
         if can_push_to_block { unsafe {
             let key = key.into();
-            // eprintln!("writing key of size {} at {:?} with {}",
-            //     Self::SIZE_KEY, key_ptr, &key
-            // );
-            // eprintln!("writing key of size {} at {:?} with {}",
-            //     Self::SIZE_VALUE, value_ptr, &value
-            // );
             (key_ptr as *mut Key).write(key);
             (value_ptr as *mut Value).write(value);
             let offset = key_padding + Self::SIZE_KEY + 
@@ -491,19 +498,23 @@ where
             
             //if there is no next block, create one
             if curr_block_tail.next_block.is_null() {
-                let allocated_block = std::alloc::alloc(
-                    Layout::array::<u8>(self.size.bytes())
-                        .expect("could not allocate memory")
-                );
+                let block_layout = Layout::from_size_align(
+                    self.size.bytes(), 
+                    Self::ALIGN_BLOCK
+                ).expect("could not generate memory layout");
+                let allocated_block = std::alloc::alloc(block_layout);
+
+                if allocated_block.is_null() {
+                    std::alloc::handle_alloc_error(block_layout);
+                }
 
                 let next_block_tail = allocated_block
                     .add(self.size.bytes() - Self::SIZE_TAIL);
-                //eprintln!("writing block tail at {:?}", next_block_tail);
-                (next_block_tail as *mut BlockTail).write(BlockTail {
-                    prev_block: (*self.current_frame.get()).as_ref().current_frame_ptr,
-                    prev_block_bytes_used: (*self.buffer_bytes_used.get()),
-                    next_block: std::ptr::null_mut()
-                });
+                (next_block_tail as *mut BlockTail).write(BlockTail::new(
+                    (*self.current_frame.get()).as_ref().current_frame_ptr,
+                    *self.buffer_bytes_used.get(),
+                    std::ptr::null_mut()
+                ));
 
                 curr_block_tail.next_block = allocated_block;
             }
@@ -526,12 +537,6 @@ where
             *self.buffer_bytes_used.get() = block_offset;
 
             let key = key.into();
-            // eprintln!("writing key of size {} at {:?} with {}",
-            //     Self::SIZE_KEY, key_ptr, &key
-            // );
-            // eprintln!("writing key of size {} at {:?} with {}",
-            //     Self::SIZE_VALUE, value_ptr, &value
-            // );
 
             (key_ptr as *mut Key).write(key.into());
             (value_ptr as *mut Value).write(value);
@@ -626,11 +631,7 @@ where
         let key_value_size = Self::SIZE_KEY + value_padding +
             Self::SIZE_VALUE + next_key_padding;
 
-        //eprintln!("starting search at {:?} until {:?}", peek_ptr, stack_frame_ptr_after);
         while peek_ptr > stack_frame_ptr_after {
-            // eprintln!("peeking at {:?} until {:?} with {} bytes remaining", 
-            //     peek_ptr, stack_frame_ptr_after, bytes_remaining
-            // );
             if bytes_remaining == 0 {
                 if curr_block_tail.prev_block.is_null() {
                     unreachable!("{}", concat!(
@@ -640,7 +641,7 @@ where
                         "thus this should never be reached"
                     ))
                 }
-                bytes_remaining = curr_block_tail.prev_block_bytes_used;
+                bytes_remaining = curr_block_tail.prev_block_bytes_used();
                 peek_ptr = curr_block_tail.prev_block;
 
                 unsafe {
@@ -660,10 +661,6 @@ where
                 let key_compare = (peek_ptr as *mut Key).as_ref_unchecked();
                 let value = peek_ptr.add(Self::SIZE_KEY + next_key_padding)
                     .cast::<Value>();
-
-                // eprintln!("comparing key {} with value {} at {:?} to key {}",
-                //     key_compare, value.as_ref().unwrap(), peek_ptr, &key
-                // );
 
                 if key == *key_compare {
                     return Some(StackRef {
@@ -753,18 +750,14 @@ where
         //so we'll use key alignment
         let mut just_jumped_block = false;
         let mut expect_key_value_pair = true;
-        let mut stack_frame_ptr_after = {unsafe {
+        let mut stack_frame_ptr_after = unsafe {
             let offset_ptr = (stack_frame as *const StackFrameHeader as *mut u8)
                 .add(Self::SIZE_HEADER);
             let padding = offset_ptr.align_offset(Self::ALIGN_KEY);
             offset_ptr.add(padding)
-        }};
+        };
 
-        //eprintln!("starting search at {:?} until {:?}", peek_ptr, stack_frame_ptr_after);
         loop {
-            // eprintln!("peeking at {:?} until {:?} with {} bytes remaining", 
-            //     peek_ptr, stack_frame_ptr_after, bytes_remaining
-            // );
             if bytes_remaining == 0 {
                 if curr_block_tail.prev_block.is_null() {
                     unreachable!("{}", concat!(
@@ -774,7 +767,7 @@ where
                         "thus this should never be reached"
                     ))
                 }
-                bytes_remaining = curr_block_tail.prev_block_bytes_used;
+                bytes_remaining = curr_block_tail.prev_block_bytes_used();
                 peek_ptr = curr_block_tail.prev_block;
 
                 unsafe {
@@ -827,10 +820,6 @@ where
                 let key_compare = (peek_ptr as *mut Key).as_ref_unchecked();
                 let value = peek_ptr.add(Self::SIZE_KEY + next_key_padding)
                     .cast::<Value>();
-
-                // eprintln!("comparing key {} with value {} at {:?} to key {}",
-                //     key_compare, value.as_ref().unwrap(), peek_ptr, &key
-                // );
 
                 if key == *key_compare {
                     return Some(StackRef {
@@ -989,7 +978,7 @@ where
 
                 count_blocks += 1;
 
-                bytes_remaining = curr_block_tail.prev_block_bytes_used;
+                bytes_remaining = curr_block_tail.prev_block_bytes_used();
                 peek_ptr = curr_block_tail.prev_block;
 
                 let offset = self.real_size().bytes() - bytes_remaining;
@@ -1068,7 +1057,6 @@ where
     Key: Eq + Hash
 {
     fn drop(&mut self) {
-        //eprintln!("dropping stack frame");
         unsafe {
             let current_frame_ptr = (*self.current_frame.get()).as_ptr().cast::<u8>();
             let mut bytes_remaining = *self.buffer_bytes_used.get();
@@ -1099,11 +1087,7 @@ where
             let key_value_size = Self::SIZE_KEY + value_padding +
                 Self::SIZE_VALUE + next_key_padding;
     
-            //eprintln!("starting search at {:?} until {:?}", peek_ptr, stack_frame_ptr_after);
             while peek_ptr > stack_frame_ptr_after {
-                // eprintln!("peeking at {:?} until {:?} with {} bytes remaining", 
-                //     peek_ptr, stack_frame_ptr_after, bytes_remaining
-                // );
                 if bytes_remaining == 0 {
                     if curr_block_tail.prev_block.is_null() {
                         unreachable!("{}", concat!(
@@ -1113,7 +1097,7 @@ where
                             "thus this should never be reached"
                         ))
                     }
-                    bytes_remaining = curr_block_tail.prev_block_bytes_used;
+                    bytes_remaining = curr_block_tail.prev_block_bytes_used();
                     peek_ptr = curr_block_tail.prev_block;
     
                     let offset = self.real_size().bytes() - bytes_remaining;
@@ -1136,21 +1120,20 @@ where
             }
             
             if (*self.current_frame.get()).as_ref().previous_frame.is_none() {
-                //eprintln!("dropping whole stack");
                 let mut prev_addr;
                 let mut next_addr = (*self.current_frame.get()).as_ptr() as *mut u8;
 
                 while !next_addr.is_null() {
-                    //eprintln!("dropping block of size {} bytes at {:?}", self.size.bytes(), next_addr);
-                    
                     prev_addr = next_addr;
-                    //eprintln!("grabbing tail at {:?}", next_addr.add(self.real_size().bytes()));
                     let block_tail = next_addr.add(self.real_size().bytes())
                         .cast::<BlockTail>().as_ref().unwrap_unchecked();
-                    //eprintln!("successfully grabbed tail");
                     next_addr = block_tail.next_block;
 
-                    std::alloc::dealloc(prev_addr, Layout::array::<u8>(self.size.bytes()).expect("fuck"));
+                    std::alloc::dealloc(
+                        prev_addr, 
+                        Layout::from_size_align(self.size.bytes(), Self::ALIGN_BLOCK)
+                            .expect("could not generate memory layout")
+                    );
                 }
             }
         }

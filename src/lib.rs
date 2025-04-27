@@ -1,4 +1,5 @@
 #![warn(missing_docs)]
+#![feature(pointer_is_aligned_to)]
 #![feature(ptr_as_ref_unchecked)]
 
 //! A set of Allocators based on the concept of a stack

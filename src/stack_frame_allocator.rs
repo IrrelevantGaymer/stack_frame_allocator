@@ -69,6 +69,10 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
     #[allow(dead_code)]
     const ALIGN_TAIL:       usize = std::mem::align_of::<BlockTail>();
 
+    const ALIGN_BLOCK: usize = [Self::ALIGN_HEADER, Self::ALIGN_VALUE][
+        (Self::ALIGN_HEADER < Self::ALIGN_VALUE) as usize
+    ];
+
     /// Creates a new StackFrameAllocator
     /// 
     /// The StackFrameAllocator allows the creation of "Frames"
@@ -115,20 +119,22 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
         let allocated_block;
         let current_frame_pointer;
         unsafe {
-            allocated_block = std::alloc::alloc(
-                Layout::array::<u8>(size.bytes()).expect("could not allocate memory")
-            );
+            let block_layout = Layout::from_size_align(
+                size.bytes(), 
+                Self::ALIGN_BLOCK
+            ).expect("could not generate memory layout");
+            allocated_block = std::alloc::alloc(block_layout);
+
+            if allocated_block.is_null() {
+                std::alloc::handle_alloc_error(block_layout);
+            }
             
             //size.bytes() should be a multiple of a large power of two,
             //therefore size.bytes() should be aligned to BlockTail already,
             //so we just need to move back so that way we're writing the block tail
             //at the end of the block
             let block_tail = allocated_block.add(size.bytes() - Self::SIZE_TAIL);
-            (block_tail as *mut BlockTail).write(BlockTail {
-                prev_block: std::ptr::null_mut(),
-                prev_block_bytes_used: 0 /* we'll never read this value if prev_block is null */,
-                next_block: std::ptr::null_mut()
-            });
+            (block_tail as *mut BlockTail).write(BlockTail::default());
 
             current_frame_pointer = allocated_block.add(Self::SIZE_HEADER);
         }
@@ -307,20 +313,24 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
             let curr_block_tail = self.get_block_tail();
             
             if curr_block_tail.next_block.is_null() {
-                let allocated_block = unsafe {std::alloc::alloc(
-                    Layout::array::<u8>(self.size.bytes())
-                        .expect("could not allocate memory")
-                )};
+                let block_layout = Layout::from_size_align(
+                    self.size.bytes(), 
+                    Self::ALIGN_BLOCK
+                ).expect("could not generate memory layout");
+                let allocated_block = std::alloc::alloc(block_layout);
+    
+                if allocated_block.is_null() {
+                    std::alloc::handle_alloc_error(block_layout);
+                }
 
                 let next_block_tail = allocated_block.add(
                     self.size.bytes() - Self::SIZE_TAIL
                 );
-                //eprintln!("writing block tail at {:?}", next_block_tail);
-                (next_block_tail as *mut BlockTail).write(BlockTail {
-                    prev_block: (*self.current_frame.get()).as_ptr().cast(),
-                    prev_block_bytes_used: (*self.buffer_bytes_used.get()),
-                    next_block: std::ptr::null_mut()
-                });
+                (next_block_tail as *mut BlockTail).write(BlockTail::new(
+                    (*self.current_frame.get()).as_ptr().cast(),
+                    *self.buffer_bytes_used.get(),
+                    std::ptr::null_mut()
+                ));
 
                 curr_block_tail.next_block = allocated_block;
             }
@@ -328,6 +338,7 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
             curr_block_tail.next_block
         };
 
+        *self.buffer_bytes_used.get() += Self::SIZE_HEADER;
         let current_frame_ptr = mem.add(Self::SIZE_HEADER);
         
         let new_frame = StackFrameHeader {
@@ -412,12 +423,6 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
         }
         
         if can_push_to_block { unsafe {
-            // eprintln!("writing key of size {} at {:?} with {}",
-            //     Self::SIZE_KEY, key_ptr, &key
-            // );
-            // eprintln!("writing key of size {} at {:?} with {}",
-            //     Self::SIZE_VALUE, value_ptr, &value
-            // );
             (value_ptr as *mut Value).write(value);
             let offset = value_padding + Self::SIZE_VALUE;
             (*(*self.current_frame.get()).as_ptr()).current_frame_ptr = {
@@ -435,19 +440,23 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
             
             //if there is no next block, create one
             if curr_block_tail.next_block.is_null() {
-                let allocated_block = std::alloc::alloc(
-                    Layout::array::<u8>(self.size.bytes())
-                        .expect("could not allocate memory")
-                );
+                let block_layout = Layout::from_size_align(
+                    self.size.bytes(), 
+                    Self::ALIGN_BLOCK
+                ).expect("could not generate memory layout");
+                let allocated_block = std::alloc::alloc(block_layout);
+    
+                if allocated_block.is_null() {
+                    std::alloc::handle_alloc_error(block_layout);
+                }
 
                 let next_block_tail = allocated_block
                     .add(self.size.bytes() - Self::SIZE_TAIL);
-                //eprintln!("writing block tail at {:?}", next_block_tail);
-                (next_block_tail as *mut BlockTail).write(BlockTail {
-                    prev_block: (*self.current_frame.get()).as_ref().current_frame_ptr,
-                    prev_block_bytes_used: (*self.buffer_bytes_used.get()),
-                    next_block: std::ptr::null_mut()
-                });
+                (next_block_tail as *mut BlockTail).write(BlockTail::new(
+                    (*self.current_frame.get()).as_ref().current_frame_ptr,
+                    *self.buffer_bytes_used.get(),
+                    std::ptr::null_mut()
+                ));
 
                 curr_block_tail.next_block = allocated_block;
             }
@@ -463,13 +472,6 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
             let block_offset = value_padding + Self::SIZE_VALUE;
 
             *self.buffer_bytes_used.get() = block_offset;
-
-            // eprintln!("writing key of size {} at {:?} with {}",
-            //     Self::SIZE_KEY, key_ptr, &key
-            // );
-            // eprintln!("writing key of size {} at {:?} with {}",
-            //     Self::SIZE_VALUE, value_ptr, &value
-            // );
 
             (value_ptr as *mut Value).write(value);
             (*(*self.current_frame.get()).as_ptr()).current_frame_ptr =
@@ -614,7 +616,7 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
 
                 count_blocks += 1;
 
-                bytes_remaining = curr_block_tail.prev_block_bytes_used;
+                bytes_remaining = curr_block_tail.prev_block_bytes_used();
                 peek_ptr = curr_block_tail.prev_block;
 
                 let offset = self.real_size().bytes() - bytes_remaining;
@@ -688,7 +690,6 @@ impl<'s, Value> StackFrameAllocator<'s, Value> {
 
 impl<'s, Value> Drop for StackFrameAllocator<'s, Value> {
     fn drop(&mut self) {
-        //eprintln!("dropping stack frame");
         unsafe {
             let current_frame_ptr = (*self.current_frame.get()).as_ptr().cast::<u8>();
             let mut bytes_remaining = *self.buffer_bytes_used.get();
@@ -705,11 +706,7 @@ impl<'s, Value> Drop for StackFrameAllocator<'s, Value> {
                 offset_ptr.add(padding)
             };
     
-            //eprintln!("starting search at {:?} until {:?}", peek_ptr, stack_frame_ptr_after);
             while peek_ptr > stack_frame_ptr_after {
-                // eprintln!("peeking at {:?} until {:?} with {} bytes remaining", 
-                //     peek_ptr, stack_frame_ptr_after, bytes_remaining
-                // );
                 if bytes_remaining == 0 {
                     if curr_block_tail.prev_block.is_null() {
                         unreachable!("{}", concat!(
@@ -719,7 +716,7 @@ impl<'s, Value> Drop for StackFrameAllocator<'s, Value> {
                             "thus this should never be reached"
                         ))
                     }
-                    bytes_remaining = curr_block_tail.prev_block_bytes_used;
+                    bytes_remaining = curr_block_tail.prev_block_bytes_used();
                     peek_ptr = curr_block_tail.prev_block;
     
                     let offset = self.real_size().bytes() - bytes_remaining;
@@ -739,21 +736,22 @@ impl<'s, Value> Drop for StackFrameAllocator<'s, Value> {
             }
             
             if (*self.current_frame.get()).as_ref().previous_frame.is_none() {
-                //eprintln!("dropping whole stack");
                 let mut prev_addr;
                 let mut next_addr = (*self.current_frame.get()).as_ptr() as *mut u8;
 
                 while !next_addr.is_null() {
-                    //eprintln!("dropping block of size {} bytes at {:?}", self.size.bytes(), next_addr);
-                    
                     prev_addr = next_addr;
-                    //eprintln!("grabbing tail at {:?}", next_addr.add(self.real_size().bytes()));
                     let block_tail = next_addr.add(self.real_size().bytes())
                         .cast::<BlockTail>().as_ref().unwrap_unchecked();
-                    //eprintln!("successfully grabbed tail");
                     next_addr = block_tail.next_block;
 
-                    std::alloc::dealloc(prev_addr, Layout::array::<u8>(self.size.bytes()).expect("fuck"));
+                    std::alloc::dealloc(
+                        prev_addr, 
+                        Layout::from_size_align(
+                            self.size.bytes(), 
+                            Self::ALIGN_BLOCK
+                        ).expect("could not generate memory layout")
+                    );
                 }
             }
         }
